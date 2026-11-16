@@ -11,6 +11,12 @@ import {AppError} from "./http/errors";
 export function initFirebase(): App {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (raw) {
+    // Với biến emulator, Admin SDK chấp nhận token không chữ ký: cấm dùng chung với khóa thật.
+    if (process.env.FIRESTORE_EMULATOR_HOST || process.env.FIREBASE_AUTH_EMULATOR_HOST) {
+      throw new Error(
+        "Emulator variables must not be set together with FIREBASE_SERVICE_ACCOUNT_JSON",
+      );
+    }
     return initializeApp({credential: cert(JSON.parse(raw))});
   }
   if (process.env.FIRESTORE_EMULATOR_HOST) {

@@ -1,5 +1,9 @@
-import {describe, expect, it} from "vitest";
-import {isTokenRejection} from "../../src/server";
+import {afterEach, describe, expect, it, vi} from "vitest";
+import {initFirebase, isTokenRejection} from "../../src/server";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("isTokenRejection", () => {
   it("true khi token bị từ chối", () => {
@@ -12,5 +16,22 @@ describe("isTokenRejection", () => {
     expect(isTokenRejection(new Error("network"))).toBe(false);
     expect(isTokenRejection({code: 5})).toBe(false);
     expect(isTokenRejection(null)).toBe(false);
+  });
+});
+
+describe("initFirebase", () => {
+  const MESSAGE =
+    "Emulator variables must not be set together with FIREBASE_SERVICE_ACCOUNT_JSON";
+
+  it("từ chối khi có service account cùng FIREBASE_AUTH_EMULATOR_HOST", () => {
+    vi.stubEnv("FIREBASE_SERVICE_ACCOUNT_JSON", "{}");
+    vi.stubEnv("FIREBASE_AUTH_EMULATOR_HOST", "127.0.0.1:9099");
+    expect(() => initFirebase()).toThrow(MESSAGE);
+  });
+
+  it("từ chối khi có service account cùng FIRESTORE_EMULATOR_HOST", () => {
+    vi.stubEnv("FIREBASE_SERVICE_ACCOUNT_JSON", "{}");
+    vi.stubEnv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8085");
+    expect(() => initFirebase()).toThrow(MESSAGE);
   });
 });
