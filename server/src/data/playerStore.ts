@@ -1,0 +1,116 @@
+import {
+  FieldValue,
+  type DocumentData,
+  type DocumentReference,
+  type Firestore,
+  type Transaction,
+} from "firebase-admin/firestore";
+import type {PlayerSnapshot} from "../domain/player";
+import {type DayState, EMPTY_DAY} from "../domain/rewards";
+
+export interface DeviceState {
+  lastSeq: number;
+  lastSyncAt: unknown;
+}
+
+/** Các trường của players/{uid} mà phần 1 đọc. */
+export interface StoredPlayer extends PlayerSnapshot {
+  feedQuizSinceReward: number;
+  devices: Record<string, DeviceState>;
+}
+
+export type LedgerEntry =
+  | {type: "import"; gems: number; xp: number; deviceId: string}
+  | {type: "sync"; gems: number; xp: number; deviceId: string; seqFrom: number; seqTo: number};
+
+function toDayState(data: DocumentData | undefined): DayState {
+  if (!data) return EMPTY_DAY;
+  return {
+    counts: data.counts ?? {},
+    gemsEarned: data.gemsEarned ?? 0,
+    xpEarned: data.xpEarned ?? 0,
+    quests: data.quests ?? [],
+    streakDay: data.streakDay ?? false,
+  };
+}
+
+/** Các thao tác đọc và ghi trong một transaction. Mọi lượt đọc phải đứng trước lượt ghi. */
+export class PlayerTx {
+  constructor(
+    private readonly db: Firestore,
+    private readonly tx: Transaction,
+  ) {}
+
+  private player(uid: string): DocumentReference {
+    return this.db.collection("players").doc(uid);
+  }
+
+  async getPlayer(uid: string): Promise<StoredPlayer | null> {
+    const snap = await this.tx.get(this.player(uid));
+    return snap.exists ? (snap.data() as StoredPlayer) : null;
+  }
+
+  async getDays(uid: string, days: string[]): Promise<Map<string, DayState>> {
+    const result = new Map<string, DayState>();
+    if (days.length === 0) return result;
+    const refs = days.map((day) => this.player(uid).collection("days").doc(day));
+    const snaps = await this.tx.getAll(...refs);
+    for (const snap of snaps) result.set(snap.id, toDayState(snap.data()));
+    return result;
+  }
+
+  /** Id của mọi document days đang có streakDay == true. */
+  async getStreakDays(uid: string): Promise<string[]> {
+    const query = this.player(uid).collection("days").where("streakDay", "==", true).select();
+    const snap = await this.tx.get(query);
+    return snap.docs.map((doc) => doc.id);
+  }
+
+  createPlayer(uid: string, player: PlayerSnapshot, deviceId: string): void {
+    const now = FieldValue.serverTimestamp();
+    this.tx.create(this.player(uid), {
+      ...player,
+      feedQuizSinceReward: 0,
+      devices: {[deviceId]: {lastSeq: 0, lastSyncAt: now}},
+      importedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  updatePlayer(
+    uid: string,
+    player: PlayerSnapshot,
+    feedQuizSinceReward: number,
+    devices: Record<string, DeviceState>,
+    deviceId: string,
+    lastSeq: number,
+  ): void {
+    const now = FieldValue.serverTimestamp();
+    this.tx.update(this.player(uid), {
+      ...player,
+      feedQuizSinceReward,
+      devices: {...devices, [deviceId]: {lastSeq, lastSyncAt: now}},
+      updatedAt: now,
+    });
+  }
+
+  setDay(uid: string, day: string, state: DayState): void {
+    this.tx.set(this.player(uid).collection("days").doc(day), state, {merge: true});
+  }
+
+  addLedger(uid: string, entry: LedgerEntry): void {
+    this.tx.create(this.player(uid).collection("ledger").doc(), {
+      ...entry,
+      at: FieldValue.serverTimestamp(),
+    });
+  }
+}
+
+export class PlayerStore {
+  constructor(private readonly db: Firestore) {}
+
+  transaction<T>(fn: (tx: PlayerTx) => Promise<T>): Promise<T> {
+    return this.db.runTransaction((tx) => fn(new PlayerTx(this.db, tx)));
+  }
+}
