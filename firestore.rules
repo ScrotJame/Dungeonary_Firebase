@@ -15,6 +15,31 @@ service cloud.firestore {
                           && request.auth.uid == userId;
     }
 
+    // Trạng thái trò chơi: chủ tài khoản chỉ đọc, chỉ server ghi
+    match /players/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+
+      match /{sub=**} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
+      }
+    }
+
+    // Danh mục: người đã đăng nhập đọc, không ai ghi từ app
+    match /shop_items/{id} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+    match /achievement_definitions/{id} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+    match /companion_definitions/{id} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
     // Chặn các collection khác
     match /{document=**} {
       allow read, write: if false;
