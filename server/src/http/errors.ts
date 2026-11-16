@@ -28,11 +28,17 @@ export interface HttpError {
   body: {error: {code: ErrorCode; reason?: string}};
 }
 
-/** Lỗi do express.json() ném khi JSON hỏng hoặc thân quá lớn. */
+/** Lỗi 4xx do express.json() ném: JSON hỏng, thân quá lớn, charset/encoding lạ... */
 function isBodyParserError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
-  const type = (err as {type?: unknown}).type;
-  return type === "entity.parse.failed" || type === "entity.too.large";
+  const {type, status, statusCode} = err as {
+    type?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
+  };
+  if (typeof type !== "string") return false;
+  const code = typeof status === "number" ? status : statusCode;
+  return typeof code === "number" && code >= 400 && code <= 499;
 }
 
 export function toHttp(err: unknown): HttpError {

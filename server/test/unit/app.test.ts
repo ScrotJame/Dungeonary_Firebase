@@ -76,6 +76,16 @@ describe("thân request", () => {
     expect(res.body).toEqual({error: {code: "invalid-argument"}});
   });
 
+  it("charset không hỗ trợ thì 400, không phải 500", async () => {
+    const res = await request(makeApp(echo))
+      .post("/v1/echo")
+      .set(AUTH)
+      .set("Content-Type", "application/json; charset=latin1")
+      .send('{"a":1}');
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({error: {code: "invalid-argument"}});
+  });
+
   it("thân lớn hơn 256 KB thì 400", async () => {
     const res = await request(makeApp(echo))
       .post("/v1/echo")
