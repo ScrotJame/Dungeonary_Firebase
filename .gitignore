@@ -71,3 +71,7 @@ node_modules/
 # Service account keys (never commit)
 *service-account*.json
 *serviceAccount*.json
+
+# Local-only docs (not published)
+docs/specs/
+CLAUDE.md
