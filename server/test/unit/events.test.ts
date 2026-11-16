@@ -40,6 +40,23 @@ describe("parseSyncInput: vỏ request", () => {
     expectInvalid(() => parseSyncInput({deviceId: "dev-1", events: {}}));
   });
 
+  it("từ chối deviceId dạng __x__ mà Firestore dành riêng, vẫn nhận __x và a__b__", () => {
+    expectInvalid(() => parseSyncInput({deviceId: "__x__", events: []}));
+    expectInvalid(() => parseImportInput({
+      deviceId: "__x__",
+      profile: {
+        gems: 0,
+        experience: 0,
+        totalLearned: 0,
+        currentStreak: 0,
+        longestStreak: 0,
+        lastActiveDay: null,
+      },
+    }));
+    expect(parseSyncInput({deviceId: "__x", events: []}).deviceId).toBe("__x");
+    expect(parseSyncInput({deviceId: "a__b__", events: []}).deviceId).toBe("a__b__");
+  });
+
   it("từ chối lô quá 200 sự kiện", () => {
     const events = Array.from({length: 201}, (_, i) => ({seq: i + 1}));
     expectInvalid(() => parseSyncInput({deviceId: "dev-1", events}));

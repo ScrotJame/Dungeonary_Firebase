@@ -61,6 +61,8 @@ function parseDeviceId(v: unknown): string {
   if (typeof v !== "string" || v.length === 0 || v.length > MAX_DEVICE_ID_LENGTH) {
     throw new AppError("invalid-argument");
   }
+  // deviceId là khóa trong map `devices`; Firestore cấm tên trường dạng __.*__.
+  if (/^__.*__$/.test(v)) throw new AppError("invalid-argument");
   return v;
 }
 
