@@ -11,7 +11,8 @@ export function requireAuth(verifyToken: VerifyToken): RequestHandler {
     let uid: string;
     try {
       uid = (await verifyToken(match[1])).uid;
-    } catch {
+    } catch (err) {
+      if (err instanceof AppError) throw err;
       throw new AppError("unauthenticated");
     }
     res.locals.uid = uid;

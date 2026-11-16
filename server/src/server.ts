@@ -6,6 +6,7 @@ import {createApp} from "./app";
 import {PlayerStore} from "./data/playerStore";
 import {type HandlerDeps, importGuestProgress} from "./handlers/importGuestProgress";
 import {syncProgress} from "./handlers/syncProgress";
+import {AppError} from "./http/errors";
 
 export function initFirebase(): App {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
@@ -20,6 +21,18 @@ export function initFirebase(): App {
   throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not set");
 }
 
+/**
+ * True khi Admin SDK từ chối chính token (hết hạn, sai định dạng...).
+ * `auth/internal-error` (không tải được khóa công khai...) không phải lỗi của token.
+ */
+export function isTokenRejection(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const code = (err as {code?: unknown}).code;
+  return typeof code === "string" &&
+    code.startsWith("auth/") &&
+    code !== "auth/internal-error";
+}
+
 export function buildServer(firebaseApp: App): Express {
   const auth = getAuth(firebaseApp);
   const deps: HandlerDeps = {
@@ -27,7 +40,15 @@ export function buildServer(firebaseApp: App): Express {
     now: Date.now,
   };
   return createApp({
-    verifyToken: (token) => auth.verifyIdToken(token),
+    verifyToken: async (token) => {
+      try {
+        return await auth.verifyIdToken(token);
+      } catch (err) {
+        if (isTokenRejection(err)) throw err;
+        console.error(err);
+        throw new AppError("internal");
+      }
+    },
     handlers: {
       importGuestProgress: (uid, input) => importGuestProgress(uid, input, deps),
       syncProgress: (uid, input) => syncProgress(uid, input, deps),

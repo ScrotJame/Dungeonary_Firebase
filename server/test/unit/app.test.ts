@@ -55,6 +55,22 @@ describe("xác thực", () => {
   });
 });
 
+describe("xác minh token thất bại không do token", () => {
+  it("verifyToken ném AppError internal thì 500, không phải 401", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const app = createApp({
+      verifyToken: async () => {
+        throw new AppError("internal");
+      },
+      handlers: {echo},
+    });
+    const res = await request(app).post("/v1/echo").set(AUTH).send({});
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({error: {code: "internal"}});
+    expect(log).toHaveBeenCalled();
+  });
+});
+
 describe("thân request", () => {
   it("Content-Type không phải JSON thì 400", async () => {
     const res = await request(makeApp(echo))
