@@ -252,6 +252,20 @@ describe("syncProgress: Streak Freeze, lostStreak, Double Gems", () => {
     });
   });
 
+  it("gửi lại cùng một lô không trừ Freeze hai lần", async () => {
+    const uid = await seedPlayer({
+      fields: {streak: {current: 10, longest: 10, lastDay: "2026-11-15"}},
+      inventory: {streak_freeze: 1},
+    });
+    await sync(uid, questsOn(1, TODAY, NOW));
+    const out = await sync(uid, questsOn(1, TODAY, NOW));
+
+    expect(out.player.streak).toEqual({current: 11, longest: 11, lastDay: TODAY});
+    expect(await freezes(uid)).toBe(0);
+    const ledger = await db.collection(`players/${uid}/ledger`).where("type", "==", "use_item").get();
+    expect(ledger.size).toBe(1);
+  });
+
   it("thiếu một Freeze: không trừ cái nào, chuỗi về 1, ghi lostStreak", async () => {
     const uid = await seedPlayer({
       fields: {streak: {current: 10, longest: 10, lastDay: "2026-11-14"}},
