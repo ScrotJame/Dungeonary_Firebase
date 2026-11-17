@@ -2,6 +2,7 @@ import {randomUUID} from "node:crypto";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {getFirestore} from "firebase-admin/firestore";
 import {PlayerStore} from "../../src/data/playerStore";
+import {CATALOG, ITEM_IDS, type ItemId} from "../../src/config/shop";
 import {importGuestProgress} from "../../src/handlers/importGuestProgress";
 
 if (!process.env.FIRESTORE_EMULATOR_HOST) {
@@ -46,4 +47,20 @@ export async function seedPlayer(opts: {
     await db.doc(`players/${uid}/inventory/${itemId}`).set({quantity});
   }
   return uid;
+}
+
+/**
+ * Store đọc danh mục từ một collection riêng (đã nạp CATALOG, ghi đè theo
+ * `overrides`), để test sửa danh mục không giẫm lên test khác.
+ */
+export async function storeWithCatalog(
+  overrides: Partial<Record<ItemId, Record<string, unknown>>> = {},
+): Promise<PlayerStore> {
+  const catalogCollection = `shop_items_test_${randomUUID()}`;
+  const batch = db.batch();
+  for (const id of ITEM_IDS) {
+    batch.set(db.collection(catalogCollection).doc(id), {...CATALOG[id], ...overrides[id]});
+  }
+  await batch.commit();
+  return new PlayerStore(db, {catalogCollection});
 }

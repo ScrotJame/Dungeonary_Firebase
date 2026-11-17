@@ -7,7 +7,7 @@ import {
   type Transaction,
 } from "firebase-admin/firestore";
 import {addDays} from "../domain/days";
-import type {LostStreak, PlayerSnapshot, TimeWindow} from "../domain/player";
+import type {LostStreak, PlayerChanges, PlayerSnapshot, TimeWindow} from "../domain/player";
 import {type DayState, EMPTY_DAY} from "../domain/rewards";
 import type {StreakRun} from "../domain/streak";
 
@@ -39,7 +39,8 @@ export type LedgerEntry =
     quantity: number;
     days: string[];
     deviceId: string;
-  };
+  }
+  | {type: "purchase"; gems: number; xp: 0; itemId: string; quantity: number; price: number};
 
 /** Ghi một phần document days; `frozen` đánh dấu ngày được Streak Freeze cứu. */
 export type DayWrite = Partial<DayState> & {frozen?: boolean};
@@ -73,6 +74,7 @@ export class PlayerTx {
   constructor(
     private readonly db: Firestore,
     private readonly tx: Transaction,
+    private readonly catalogCollection: string,
   ) {}
 
   private player(uid: string): DocumentReference {
@@ -139,6 +141,17 @@ export class PlayerTx {
     return Number.isSafeInteger(quantity) && quantity > 0 ? quantity : 0;
   }
 
+  /** Document shop_items/{itemId} (hoặc collection danh mục đã cấu hình), chưa kiểm tra. */
+  async getCatalogItem(itemId: string): Promise<Record<string, unknown> | undefined> {
+    const snap = await this.tx.get(this.db.collection(this.catalogCollection).doc(itemId));
+    return snap.data();
+  }
+
+  async getLedger(uid: string, id: string): Promise<Record<string, unknown> | undefined> {
+    const snap = await this.tx.get(this.player(uid).collection("ledger").doc(id));
+    return snap.data();
+  }
+
   createPlayer(uid: string, player: PlayerSnapshot, deviceId: string): void {
     const now = FieldValue.serverTimestamp();
     this.tx.create(this.player(uid), {
@@ -171,6 +184,23 @@ export class PlayerTx {
     });
   }
 
+  /** Ghi các thay đổi của purchaseItem và useItem lên players/{uid}. */
+  updatePlayerFields(uid: string, changes: PlayerChanges): void {
+    const data: Record<string, unknown> = {updatedAt: FieldValue.serverTimestamp()};
+    if (changes.gems !== undefined) data.gems = changes.gems;
+    if (changes.streak !== undefined) data.streak = changes.streak;
+    if (changes.doubleGems !== undefined) {
+      data["buffs.doubleGems"] = {
+        from: Timestamp.fromMillis(changes.doubleGems.from),
+        until: Timestamp.fromMillis(changes.doubleGems.until),
+      };
+    }
+    if (changes.lostStreak !== undefined) {
+      data.lostStreak = changes.lostStreak ?? FieldValue.delete();
+    }
+    this.tx.update(this.player(uid), data);
+  }
+
   setDay(uid: string, day: string, data: DayWrite): void {
     this.tx.set(this.player(uid).collection("days").doc(day), data, {merge: true});
   }
@@ -182,18 +212,32 @@ export class PlayerTx {
     });
   }
 
-  addLedger(uid: string, entry: LedgerEntry): void {
-    this.tx.create(this.player(uid).collection("ledger").doc(), {
+  /** `id` là requestId của purchaseItem và useItem; thiếu thì Firestore tự sinh id 20 ký tự. */
+  addLedger(uid: string, entry: LedgerEntry, id?: string): void {
+    const ledger = this.player(uid).collection("ledger");
+    this.tx.create(id === undefined ? ledger.doc() : ledger.doc(id), {
       ...entry,
       at: FieldValue.serverTimestamp(),
     });
   }
 }
 
+export interface StoreOptions {
+  /** Collection danh mục; test dùng tên riêng để không giẫm lên nhau. */
+  catalogCollection?: string;
+}
+
 export class PlayerStore {
-  constructor(private readonly db: Firestore) {}
+  private readonly catalogCollection: string;
+
+  constructor(
+    private readonly db: Firestore,
+    options: StoreOptions = {},
+  ) {
+    this.catalogCollection = options.catalogCollection ?? "shop_items";
+  }
 
   transaction<T>(fn: (tx: PlayerTx) => Promise<T>): Promise<T> {
-    return this.db.runTransaction((tx) => fn(new PlayerTx(this.db, tx)));
+    return this.db.runTransaction((tx) => fn(new PlayerTx(this.db, tx, this.catalogCollection)));
   }
 }
