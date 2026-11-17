@@ -1,6 +1,7 @@
 import {randomUUID} from "node:crypto";
 import request from "supertest";
 import {describe, expect, it} from "vitest";
+import {CATALOG} from "../../src/config/shop";
 import {buildServer} from "../../src/server";
 import {db, firebaseApp} from "./emulator";
 
@@ -103,5 +104,74 @@ describe("server qua HTTP", () => {
 
     const doc = (await db.doc(`players/${uid}`).get()).data();
     expect(doc?.gems).toBe(10);
+  });
+
+  it("mua rồi dùng Double Gems qua HTTP", async () => {
+    await db.doc("shop_items/double_gems").set(CATALOG.double_gems);
+    const {uid, token} = await signUp();
+    const auth = {Authorization: `Bearer ${token}`};
+    await request(app)
+      .post("/v1/importGuestProgress")
+      .set(auth)
+      .send({deviceId: "dev-1", profile: {...profile, gems: 600}});
+
+    const bought = await request(app)
+      .post("/v1/purchaseItem")
+      .set(auth)
+      .send({itemId: "double_gems", quantity: 1, expectedPrice: 500, requestId: randomUUID()});
+    expect(bought.status).toBe(200);
+    expect(bought.body).toMatchObject({
+      player: {gems: 100},
+      item: {itemId: "double_gems", quantity: 1},
+    });
+
+    const used = await request(app)
+      .post("/v1/useItem")
+      .set(auth)
+      .send({itemId: "double_gems", requestId: randomUUID()});
+    expect(used.status).toBe(200);
+    expect(used.body.effect.kind).toBe("double_gems");
+    expect(used.body.item).toEqual({itemId: "double_gems", quantity: 0});
+
+    const doc = (await db.doc(`players/${uid}`).get()).data();
+    expect(doc?.buffs?.doubleGems).toBeDefined();
+  });
+
+  it("useItem khi túi trống trả 409 not-owned; requestId sai dạng trả 400", async () => {
+    const {token} = await signUp();
+    const auth = {Authorization: `Bearer ${token}`};
+    await request(app).post("/v1/importGuestProgress").set(auth).send({deviceId: "dev-1", profile});
+
+    const empty = await request(app)
+      .post("/v1/useItem")
+      .set(auth)
+      .send({itemId: "double_gems", requestId: randomUUID()});
+    expect(empty.status).toBe(409);
+    expect(empty.body).toEqual({error: {code: "failed-precondition", reason: "not-owned"}});
+
+    const bad = await request(app)
+      .post("/v1/purchaseItem")
+      .set(auth)
+      .send({itemId: "double_gems", quantity: 1, expectedPrice: 500, requestId: "1"});
+    expect(bad.status).toBe(400);
+    expect(bad.body).toEqual({error: {code: "invalid-argument"}});
+  });
+
+  it("request thứ 61 trong một phút trả 429 resource-exhausted", async () => {
+    const {token} = await signUp();
+    const auth = {Authorization: `Bearer ${token}`};
+    for (let i = 0; i < 60; i++) {
+      const res = await request(app)
+        .post("/v1/syncProgress")
+        .set(auth)
+        .send({deviceId: "dev-1", events: []});
+      expect(res.status).toBe(409);
+    }
+    const blocked = await request(app)
+      .post("/v1/syncProgress")
+      .set(auth)
+      .send({deviceId: "dev-1", events: []});
+    expect(blocked.status).toBe(429);
+    expect(blocked.body).toEqual({error: {code: "resource-exhausted"}});
   });
 });

@@ -24,7 +24,8 @@ beforeAll(async () => {
     await setDoc(doc(admin, "players/alice"), {gems: 10});
     await setDoc(doc(admin, "players/alice/days/2026-11-17"), {gemsEarned: 1});
     await setDoc(doc(admin, "players/alice/ledger/entry-1"), {type: "import"});
-    await setDoc(doc(admin, "shop_items/streak_freeze"), {price: 100});
+    await setDoc(doc(admin, "shop_items/rules_test_item"), {price: 100});
+    await setDoc(doc(admin, "players/alice/inventory/streak_freeze"), {quantity: 1});
     await setDoc(doc(admin, "achievement_definitions/first_word"), {metric: "totalLearned"});
     await setDoc(doc(admin, "companion_definitions/pet_golden_cat"), {unlockUserLevel: 1});
   });
@@ -58,6 +59,12 @@ describe("players/{uid}", () => {
     await assertFails(getDoc(doc(guest(), "players/alice")));
   });
 
+  it("túi đồ: chủ tài khoản đọc được, không ghi được; người khác không đọc được", async () => {
+    await assertSucceeds(getDoc(doc(alice(), "players/alice/inventory/streak_freeze")));
+    await assertFails(setDoc(doc(alice(), "players/alice/inventory/streak_freeze"), {quantity: 2}));
+    await assertFails(getDoc(doc(bob(), "players/alice/inventory/streak_freeze")));
+  });
+
   it("không ai tự tạo được player cho mình", async () => {
     await assertFails(setDoc(doc(bob(), "players/bob"), {gems: 2000}));
   });
@@ -65,7 +72,7 @@ describe("players/{uid}", () => {
 
 describe("danh mục", () => {
   it.each([
-    "shop_items/streak_freeze",
+    "shop_items/rules_test_item",
     "achievement_definitions/first_word",
     "companion_definitions/pet_golden_cat",
   ])("%s: người đã đăng nhập đọc được, không ghi được; khách không đọc được", async (path) => {

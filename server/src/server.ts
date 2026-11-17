@@ -5,7 +5,9 @@ import {getFirestore} from "firebase-admin/firestore";
 import {createApp} from "./app";
 import {PlayerStore} from "./data/playerStore";
 import {type HandlerDeps, importGuestProgress} from "./handlers/importGuestProgress";
+import {purchaseItem} from "./handlers/purchaseItem";
 import {syncProgress} from "./handlers/syncProgress";
+import {useItem} from "./handlers/useItem";
 import {AppError} from "./http/errors";
 
 export function initFirebase(): App {
@@ -80,6 +82,8 @@ export function buildServer(firebaseApp: App): Express {
     handlers: {
       importGuestProgress: (uid, input) => importGuestProgress(uid, input, deps),
       syncProgress: (uid, input) => syncProgress(uid, input, deps),
+      purchaseItem: (uid, input) => purchaseItem(uid, input, deps),
+      useItem: (uid, input) => useItem(uid, input, deps),
     },
   });
 }
