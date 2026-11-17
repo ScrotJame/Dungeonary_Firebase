@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {advanceStreak, needsStreakHistory} from "../../src/domain/streak";
+import {advanceStreak, isLostStreakAlive, needsStreakHistory} from "../../src/domain/streak";
 
 const none = {current: 0, longest: 0, lastDay: null};
 
@@ -64,5 +64,12 @@ describe("needsStreakHistory", () => {
     expect(needsStreakHistory(s, ["2026-11-17", "2026-11-18"])).toBe(false);
     expect(needsStreakHistory(s, [])).toBe(false);
     expect(needsStreakHistory(none, ["2026-11-01"])).toBe(false);
+  });
+});
+
+describe("isLostStreakAlive", () => {
+  it("còn hạn khi hôm nay trừ lostOn không quá 7 ngày", () => {
+    expect(isLostStreakAlive({value: 5, lostOn: "2026-11-10"}, "2026-11-17")).toBe(true);
+    expect(isLostStreakAlive({value: 5, lostOn: "2026-11-09"}, "2026-11-17")).toBe(false);
   });
 });

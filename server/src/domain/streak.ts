@@ -1,5 +1,11 @@
-import {addDays} from "./days";
-import type {Streak} from "./player";
+import {LOST_STREAK_WINDOW_DAYS} from "../config/shop";
+import {addDays, dayDiff} from "./days";
+import type {LostStreak, Streak} from "./player";
+
+/** Save Streak còn dùng được: hôm nay trừ lostOn không quá 7 ngày. */
+export function isLostStreakAlive(lost: LostStreak, today: string): boolean {
+  return dayDiff(today, lost.lostOn) <= LOST_STREAK_WINDOW_DAYS;
+}
 
 /** Cần đọc lịch sử ngày streak khi có ngày streak mới đứng trước lastDay. */
 export function needsStreakHistory(streak: Streak, newStreakDays: string[]): boolean {

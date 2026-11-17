@@ -2,10 +2,13 @@ import {describe, expect, it} from "vitest";
 import {CATALOG, type CatalogItem} from "../../src/config/shop";
 import {
   decidePurchase,
+  decideUse,
+  extendDoubleGems,
   parseCatalogItem,
   parsePurchaseInput,
   parseUseInput,
   type PurchaseState,
+  type UseState,
 } from "../../src/domain/shop";
 
 const RID = "123e4567-e89b-42d3-a456-426614174000";
@@ -151,5 +154,101 @@ describe("decidePurchase: các dòng của bảng 5.1 theo thứ tự", () => {
 
   it("vừa chạm maxOwned vẫn mua được", () => {
     expect(decidePurchase(input(), state({owned: 1}))).toMatchObject({kind: "buy", ownedAfter: 2});
+  });
+});
+
+describe("extendDoubleGems: bảng 6.2", () => {
+  const NOW = Date.UTC(2026, 10, 17, 12);
+  const MIN30 = 30 * 60 * 1000;
+
+  it("chưa có buff: bắt đầu từ bây giờ", () => {
+    expect(extendDoubleGems(null, NOW)).toEqual({from: NOW, until: NOW + MIN30});
+  });
+
+  it("buff đã hết (until <= now): bắt đầu lại", () => {
+    expect(extendDoubleGems({from: NOW - 2 * MIN30, until: NOW}, NOW))
+      .toEqual({from: NOW, until: NOW + MIN30});
+  });
+
+  it("buff đang chạy: giữ from, cộng 30 phút vào until", () => {
+    expect(extendDoubleGems({from: NOW - 1000, until: NOW + 1000}, NOW))
+      .toEqual({from: NOW - 1000, until: NOW + 1000 + MIN30});
+  });
+});
+
+describe("decideUse: các dòng của bảng 5.2 theo thứ tự", () => {
+  const NOW = Date.UTC(2026, 10, 17, 12);
+  const input = (itemId: string) => ({itemId, requestId: RID});
+  const state = (over: Partial<UseState> = {}): UseState => ({
+    owned: 1,
+    ledger: undefined,
+    now: NOW,
+    today: "2026-11-17",
+    streak: {current: 1, longest: 10, lastDay: "2026-11-17"},
+    doubleGems: null,
+    lostStreak: {value: 10, lostOn: "2026-11-15"},
+    ...over,
+  });
+
+  it("1. ledger đã có lượt dùng khớp: replay với effect đã lưu, kể cả khi túi đã hết", () => {
+    const effect = {kind: "double_gems", until: NOW + 5};
+    const ledger = {type: "use_item", itemId: "double_gems", effect};
+    expect(decideUse(input("double_gems"), state({ledger, owned: 0})))
+      .toEqual({kind: "replay", effect});
+  });
+
+  it.each([
+    ["khác itemId", {type: "use_item", itemId: "save_streak"}],
+    ["khác loại", {type: "purchase", itemId: "double_gems", quantity: 1}],
+  ])("2. ledger đã có nhưng %s: invalid-argument, đứng trước not-usable", (_n, ledger) => {
+    expect(thrown(() => decideUse(input("double_gems"), state({ledger}))))
+      .toMatchObject({code: "invalid-argument"});
+  });
+
+  it.each(["streak_freeze", "khong_co"])("3. %s: not-usable, đứng trước not-owned", (itemId) => {
+    expect(thrown(() => decideUse(input(itemId), state({owned: 0}))))
+      .toMatchObject(fp("not-usable"));
+  });
+
+  it("4. túi trống: not-owned, đứng trước no-lost-streak", () => {
+    expect(thrown(() => decideUse(input("save_streak"), state({owned: 0, lostStreak: null}))))
+      .toMatchObject(fp("not-owned"));
+  });
+
+  it("5. Save Streak khi không có lostStreak: no-lost-streak", () => {
+    expect(thrown(() => decideUse(input("save_streak"), state({lostStreak: null}))))
+      .toMatchObject(fp("no-lost-streak"));
+  });
+
+  it("5. Save Streak khi lostStreak quá 7 ngày: no-lost-streak", () => {
+    const lostStreak = {value: 10, lostOn: "2026-11-09"};
+    expect(thrown(() => decideUse(input("save_streak"), state({lostStreak}))))
+      .toMatchObject(fp("no-lost-streak"));
+  });
+
+  it("6. Double Gems: ghi buff mới và trả until", () => {
+    expect(decideUse(input("double_gems"), state())).toEqual({
+      kind: "use",
+      effect: {kind: "double_gems", until: NOW + 30 * 60 * 1000},
+      changes: {doubleGems: {from: NOW, until: NOW + 30 * 60 * 1000}},
+    });
+  });
+
+  it("6. Save Streak: cộng value vào current, nâng longest, xoá lostStreak, giữ lastDay", () => {
+    expect(decideUse(input("save_streak"), state())).toEqual({
+      kind: "use",
+      effect: {kind: "save_streak", restored: 10},
+      changes: {
+        streak: {current: 11, longest: 11, lastDay: "2026-11-17"},
+        lostStreak: null,
+      },
+    });
+  });
+
+  it("Save Streak đúng ngày thứ 7: vẫn dùng được", () => {
+    const lostStreak = {value: 3, lostOn: "2026-11-10"};
+    expect(decideUse(input("save_streak"), state({lostStreak}))).toMatchObject({
+      kind: "use", effect: {kind: "save_streak", restored: 3},
+    });
   });
 });
