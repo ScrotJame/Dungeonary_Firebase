@@ -9,6 +9,8 @@ firebase-debug.*.log*
 .superpowers/
 # Firebase cache
 .firebase/
+.agents/
+.claude/
 
 # Firebase config
 
