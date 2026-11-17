@@ -14,6 +14,7 @@ import {
 } from "../config/rewards";
 import {dayDiff, utcDay} from "./days";
 import type {BatchItem, GameEvent} from "./events";
+import type {TimeWindow} from "./player";
 
 /** Nội dung document players/{uid}/days/{yyyy-MM-dd}. */
 export interface DayState {
@@ -71,12 +72,18 @@ export interface EventOutcome {
   counters: Counters;
 }
 
+/** Spec shop 6.2: sự kiện có from <= at < until được nhân đôi gems. */
+export function gemsMultiplierAt(doubleGems: TimeWindow | null, at: number): 1 | 2 {
+  return doubleGems !== null && doubleGems.from <= at && at < doubleGems.until ? 2 : 1;
+}
+
 /** Tính thưởng một sự kiện theo spec gốc 6.5. Không sửa tham số đầu vào. */
 export function applyEvent(
   event: GameEvent,
   day: DayState,
   counters: Counters,
   streakEligible: boolean,
+  gemsMultiplier: 1 | 2 = 1,
 ): EventOutcome {
   const counts = {...day.counts};
   let quests = day.quests;
@@ -160,6 +167,8 @@ export function applyEvent(
       break;
   }
 
+  // Double Gems: sau trần theo nguồn, trước trần tổng ngày.
+  gems *= gemsMultiplier;
   gems = Math.min(gems, Math.max(0, DAILY_TOTAL_CAP.gems - day.gemsEarned));
   xp = Math.min(xp, Math.max(0, DAILY_TOTAL_CAP.xp - day.xpEarned));
 
@@ -224,6 +233,7 @@ export function applyBatch(
   placed: Placed[],
   days: ReadonlyMap<string, DayState>,
   counters: Counters,
+  doubleGems: TimeWindow | null = null,
 ): BatchResult {
   const working = new Map(days);
   let current = counters;
@@ -231,7 +241,13 @@ export function applyBatch(
   let xp = 0;
 
   for (const {event, capDay, streakEligible} of placed) {
-    const out = applyEvent(event, working.get(capDay) ?? EMPTY_DAY, current, streakEligible);
+    const out = applyEvent(
+      event,
+      working.get(capDay) ?? EMPTY_DAY,
+      current,
+      streakEligible,
+      gemsMultiplierAt(doubleGems, event.at),
+    );
     working.set(capDay, out.day);
     current = out.counters;
     gems += out.gems;

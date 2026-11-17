@@ -6,8 +6,10 @@ import {
   type Counters,
   type DayState,
   EMPTY_DAY,
+  gemsMultiplierAt,
   placeBatch,
   placeEvent,
+  type Placed,
 } from "../../src/domain/rewards";
 
 const NOW = Date.UTC(2026, 10, 17, 12);
@@ -294,5 +296,61 @@ describe("applyBatch", () => {
     const out = applyBatch(placed, new Map(), zero);
     expect(out.days.size).toBe(0);
     expect(out.newStreakDays).toEqual([]);
+  });
+});
+
+describe("gemsMultiplierAt", () => {
+  const win = {from: NOW, until: NOW + 1000};
+
+  it("from tính, until không tính, không có buff thì 1", () => {
+    expect(gemsMultiplierAt(win, NOW - 1)).toBe(1);
+    expect(gemsMultiplierAt(win, NOW)).toBe(2);
+    expect(gemsMultiplierAt(win, NOW + 999)).toBe(2);
+    expect(gemsMultiplierAt(win, NOW + 1000)).toBe(1);
+    expect(gemsMultiplierAt(null, NOW)).toBe(1);
+  });
+});
+
+describe("applyEvent: Double Gems", () => {
+  const cases: Array<[string, GameEvent, number]> = [
+    ["feed_quiz_correct", quiz(), 2],
+    ["feed_quiz_correct khi eventActive", quiz({eventActive: true}), 6],
+    ["feed_reward_card", {...base, type: "feed_reward_card", xp: 100, gems: 100}, 38],
+    ["flashcard_session", {...base, type: "flashcard_session", remembered: 10}, 20],
+    ["matching_session", {...base, type: "matching_session", pairs: 2}, 20],
+    ["test_level_up", {...base, type: "test_level_up", level: 5}, 150],
+    ["quest_completed", quest("learn_10"), 30],
+  ];
+
+  it.each(cases)("%s: gems nhân đôi, XP và counts giữ nguyên", (_name, event, gems) => {
+    const counters = {...zero, feedQuizSinceReward: 3};
+    const normal = applyEvent(event, day(), counters, true);
+    const doubled = applyEvent(event, day(), counters, true, 2);
+    expect(doubled.gems).toBe(gems);
+    expect(normal.gems * 2).toBe(gems);
+    expect(doubled.xp).toBe(normal.xp);
+    expect(doubled.day.counts).toEqual(normal.day.counts);
+    expect(doubled.day.gemsEarned).toBe(gems);
+  });
+
+  it("trần tổng 2000 gems mỗi ngày vẫn giữ sau khi nhân đôi", () => {
+    const out = applyEvent(quest("learn_10"), day({gemsEarned: 1990}), zero, true, 2);
+    expect(out.gems).toBe(10);
+    expect(out.day.gemsEarned).toBe(2000);
+  });
+});
+
+describe("applyBatch: Double Gems", () => {
+  it("chỉ nhân đôi sự kiện có at nằm trong khoảng buff", () => {
+    const flash = (at: number): Placed => ({
+      event: {...base, at, type: "flashcard_session", remembered: 5},
+      capDay: TODAY,
+      streakEligible: true,
+    });
+    const out = applyBatch([flash(NOW - 1), flash(NOW)], new Map(), zero, {
+      from: NOW, until: NOW + 1000,
+    });
+    expect(out.gems).toBe(15);
+    expect(out.xp).toBe(50);
   });
 });
