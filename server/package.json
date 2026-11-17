@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node lib/main.js",
+    "seed:catalog": "tsc && node lib/scripts/seedCatalog.js",
     "test": "vitest run test/unit",
     "test:integration": "vitest run test/integration",
     "test:emulators": "cd .. && npx -y firebase-tools@14 emulators:exec --only firestore,auth --project demo-dungeonary \"npm --prefix server run test:integration\""
