@@ -1,7 +1,8 @@
+import {Timestamp} from "firebase-admin/firestore";
 import {describe, expect, it} from "vitest";
 import {importGuestProgress} from "../../src/handlers/importGuestProgress";
 import {syncProgress} from "../../src/handlers/syncProgress";
-import {db, newUid, NOW, store, TODAY} from "./emulator";
+import {db, newUid, NOW, seedPlayer, store, TODAY} from "./emulator";
 
 const deps = {store, now: () => NOW};
 const DAY_MS = 86_400_000;
@@ -218,5 +219,103 @@ describe("syncProgress", () => {
     });
     expect((await db.doc(`players/${uid}/days/2026-11-07`).get()).exists).toBe(false);
     expect((await db.doc(`players/${uid}/days/2026-11-06`).get()).exists).toBe(false);
+  });
+});
+
+describe("syncProgress: Streak Freeze, lostStreak, Double Gems", () => {
+  const questsOn = (startSeq: number, day: string, at: number) =>
+    ["default_active_time", "learn_5", "feed_5"].map((questId, i) =>
+      ev(startSeq + i, "quest_completed", {questId}, {day, at}));
+  const playerDoc = async (uid: string) => (await db.doc(`players/${uid}`).get()).data();
+  const freezes = async (uid: string) =>
+    (await db.doc(`players/${uid}/inventory/streak_freeze`).get()).get("quantity");
+  const dayDoc = async (uid: string, day: string) =>
+    (await db.doc(`players/${uid}/days/${day}`).get()).data();
+
+  it("đủ Freeze: chuỗi giữ, Freeze bị trừ, ngày lỡ có frozen, có dòng ledger", async () => {
+    const uid = await seedPlayer({
+      fields: {streak: {current: 10, longest: 10, lastDay: "2026-11-15"}},
+      inventory: {streak_freeze: 1},
+    });
+    const out = await sync(uid, questsOn(1, TODAY, NOW));
+
+    expect(out.player.streak).toEqual({current: 11, longest: 11, lastDay: TODAY});
+    expect(await freezes(uid)).toBe(0);
+    expect(await dayDoc(uid, "2026-11-16")).toEqual({frozen: true});
+    expect((await playerDoc(uid))?.lostStreak).toBeUndefined();
+
+    const ledger = await db.collection(`players/${uid}/ledger`).where("type", "==", "use_item").get();
+    expect(ledger.size).toBe(1);
+    expect(ledger.docs[0].id).toHaveLength(20);
+    expect(ledger.docs[0].data()).toMatchObject({
+      gems: 0, xp: 0, itemId: "streak_freeze", quantity: 1, days: ["2026-11-16"], deviceId: "dev-1",
+    });
+  });
+
+  it("thiếu một Freeze: không trừ cái nào, chuỗi về 1, ghi lostStreak", async () => {
+    const uid = await seedPlayer({
+      fields: {streak: {current: 10, longest: 10, lastDay: "2026-11-14"}},
+      inventory: {streak_freeze: 1},
+    });
+    const out = await sync(uid, questsOn(1, TODAY, NOW));
+
+    expect(out.player.streak).toEqual({current: 1, longest: 10, lastDay: TODAY});
+    expect(await freezes(uid)).toBe(1);
+    expect((await playerDoc(uid))?.lostStreak).toEqual({value: 10, lostOn: "2026-11-15"});
+    expect(await dayDoc(uid, "2026-11-15")).toBeUndefined();
+  });
+
+  it("bù đủ quest cho ngày được cứu: ngày đó vừa frozen vừa streakDay, Freeze không được trả", async () => {
+    const uid = await seedPlayer({
+      fields: {streak: {current: 10, longest: 10, lastDay: "2026-11-15"}},
+      inventory: {streak_freeze: 1},
+    });
+    await sync(uid, questsOn(1, TODAY, NOW));
+    const out = await sync(uid, questsOn(4, "2026-11-16", NOW - DAY_MS));
+
+    expect(await dayDoc(uid, "2026-11-16")).toMatchObject({frozen: true, streakDay: true});
+    expect(await freezes(uid)).toBe(0);
+    expect(out.player.streak).toEqual({current: 11, longest: 11, lastDay: TODAY});
+  });
+
+  it("bù ngày cũ nối lại chuỗi đã mất thì xoá lostStreak", async () => {
+    const uid = await seedPlayer({
+      fields: {streak: {current: 3, longest: 3, lastDay: "2026-11-14"}},
+    });
+    const batch = db.batch();
+    for (const day of ["2026-11-12", "2026-11-13", "2026-11-14"]) {
+      batch.set(db.doc(`players/${uid}/days/${day}`), {streakDay: true});
+    }
+    await batch.commit();
+
+    await sync(uid, questsOn(1, TODAY, NOW));
+    expect((await playerDoc(uid))?.lostStreak).toEqual({value: 3, lostOn: "2026-11-15"});
+
+    await sync(uid, questsOn(4, "2026-11-15", NOW - 2 * DAY_MS));
+    expect((await playerDoc(uid))?.lostStreak).toEqual({value: 3, lostOn: "2026-11-15"});
+
+    const out = await sync(uid, questsOn(7, "2026-11-16", NOW - DAY_MS));
+    expect(out.player.streak).toEqual({current: 6, longest: 6, lastDay: TODAY});
+    expect((await playerDoc(uid))?.lostStreak).toBeUndefined();
+  });
+
+  it("sự kiện trong khoảng Double Gems được nhân đôi gems, XP giữ nguyên", async () => {
+    const uid = await seedPlayer({
+      fields: {
+        "buffs.doubleGems": {
+          from: Timestamp.fromMillis(NOW - 60_000),
+          until: Timestamp.fromMillis(NOW + 60_000),
+        },
+      },
+    });
+    const inside = await sync(uid, [ev(1, "flashcard_session", {remembered: 10})]);
+    expect(inside.player.gems).toBe(20);
+    expect(inside.player.xp).toBe(50);
+
+    const after = await sync(uid, [
+      ev(2, "flashcard_session", {remembered: 10}, {at: NOW + 120_000}),
+    ]);
+    expect(after.player.gems).toBe(30);
+    expect(after.player.xp).toBe(100);
   });
 });

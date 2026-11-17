@@ -1,13 +1,15 @@
 import {
   FieldValue,
+  Timestamp,
   type DocumentData,
   type DocumentReference,
   type Firestore,
   type Transaction,
 } from "firebase-admin/firestore";
 import {addDays} from "../domain/days";
-import type {PlayerSnapshot} from "../domain/player";
+import type {LostStreak, PlayerSnapshot, TimeWindow} from "../domain/player";
 import {type DayState, EMPTY_DAY} from "../domain/rewards";
+import type {StreakRun} from "../domain/streak";
 
 /** Số ngày đọc ở lượt đầu khi dò chuỗi streak; đủ cho khoảng bù ngày cũ (LOOKBACK_DAYS + 1). */
 const STREAK_RUN_FIRST_READ = 8;
@@ -17,15 +19,43 @@ export interface DeviceState {
   lastSyncAt: unknown;
 }
 
-/** Các trường của players/{uid} mà phần 1 đọc. */
+/** Các trường của players/{uid} mà server đọc. */
 export interface StoredPlayer extends PlayerSnapshot {
   feedQuizSinceReward: number;
   devices: Record<string, DeviceState>;
+  /** buffs.doubleGems, đổi sang ms. */
+  doubleGems: TimeWindow | null;
+  lostStreak: LostStreak | null;
 }
 
 export type LedgerEntry =
   | {type: "import"; gems: number; xp: number; deviceId: string}
-  | {type: "sync"; gems: number; xp: number; deviceId: string; seqFrom: number; seqTo: number};
+  | {type: "sync"; gems: number; xp: number; deviceId: string; seqFrom: number; seqTo: number}
+  | {
+    type: "use_item";
+    gems: 0;
+    xp: 0;
+    itemId: "streak_freeze";
+    quantity: number;
+    days: string[];
+    deviceId: string;
+  };
+
+/** Ghi một phần document days; `frozen` đánh dấu ngày được Streak Freeze cứu. */
+export type DayWrite = Partial<DayState> & {frozen?: boolean};
+
+function toTimeWindow(v: unknown): TimeWindow | null {
+  if (typeof v !== "object" || v === null) return null;
+  const {from, until} = v as {from?: unknown; until?: unknown};
+  if (!(from instanceof Timestamp) || !(until instanceof Timestamp)) return null;
+  return {from: from.toMillis(), until: until.toMillis()};
+}
+
+function toLostStreak(v: unknown): LostStreak | null {
+  if (typeof v !== "object" || v === null) return null;
+  const {value, lostOn} = v as {value?: unknown; lostOn?: unknown};
+  return typeof value === "number" && typeof lostOn === "string" ? {value, lostOn} : null;
+}
 
 function toDayState(data: DocumentData | undefined): DayState {
   if (!data) return EMPTY_DAY;
@@ -51,7 +81,13 @@ export class PlayerTx {
 
   async getPlayer(uid: string): Promise<StoredPlayer | null> {
     const snap = await this.tx.get(this.player(uid));
-    return snap.exists ? (snap.data() as StoredPlayer) : null;
+    if (!snap.exists) return null;
+    const data = snap.data() as DocumentData;
+    return {
+      ...data,
+      doubleGems: toTimeWindow(data.buffs?.doubleGems),
+      lostStreak: toLostStreak(data.lostStreak),
+    } as StoredPlayer;
   }
 
   async getDays(uid: string, days: string[]): Promise<Map<string, DayState>> {
@@ -64,32 +100,43 @@ export class PlayerTx {
   }
 
   /**
-   * Chuỗi ngày streak liền nhau, dò lùi từ `end`. `assumed` là các ngày vừa thành
-   * ngày streak trong lô đang xử lý, chưa được ghi. Đọc document theo id, mỗi lượt
-   * gấp đôi lượt trước, nên số lượt đọc tỉ lệ với độ dài chuỗi chứ không theo tổng
-   * số ngày streak từng có.
+   * Chuỗi dò lùi từ `end` (spec shop 6.1): ngày streak được đếm, ngày chỉ có
+   * frozen được đi qua, dừng ở ngày không phải cả hai. `assumed` là các ngày vừa
+   * thành ngày streak trong lô đang xử lý, chưa được ghi. Đọc document theo id,
+   * mỗi lượt gấp đôi lượt trước, nên số lượt đọc tỉ lệ với độ dài chuỗi.
    */
-  async getStreakRun(uid: string, end: string, assumed: ReadonlySet<string>): Promise<string[]> {
-    const run: string[] = [];
+  async getStreakRun(uid: string, end: string, assumed: ReadonlySet<string>): Promise<StreakRun> {
+    const streakDays: string[] = [];
+    const frozenDays: string[] = [];
     let from = end;
     for (let size = STREAK_RUN_FIRST_READ; ; size *= 2) {
       const chunk = Array.from({length: size}, (_, i) => addDays(from, -i));
       const stored = new Set<string>();
+      const frozen = new Set<string>();
       const refs = chunk
         .filter((day) => !assumed.has(day))
         .map((day) => this.player(uid).collection("days").doc(day));
       if (refs.length > 0) {
-        const snaps = await this.tx.getAll(...refs, {fieldMask: ["streakDay"]});
+        const snaps = await this.tx.getAll(...refs, {fieldMask: ["streakDay", "frozen"]});
         for (const snap of snaps) {
           if (snap.get("streakDay") === true) stored.add(snap.id);
+          else if (snap.get("frozen") === true) frozen.add(snap.id);
         }
       }
       for (const day of chunk) {
-        if (!assumed.has(day) && !stored.has(day)) return run;
-        run.push(day);
+        if (assumed.has(day) || stored.has(day)) streakDays.push(day);
+        else if (frozen.has(day)) frozenDays.push(day);
+        else return {streakDays, frozenDays};
       }
       from = addDays(from, -size);
     }
+  }
+
+  /** Số đang giữ trong players/{uid}/inventory/{itemId}; 0 khi chưa có. */
+  async getInventory(uid: string, itemId: string): Promise<number> {
+    const snap = await this.tx.get(this.player(uid).collection("inventory").doc(itemId));
+    const quantity = snap.get("quantity");
+    return Number.isSafeInteger(quantity) && quantity > 0 ? quantity : 0;
   }
 
   createPlayer(uid: string, player: PlayerSnapshot, deviceId: string): void {
@@ -104,6 +151,7 @@ export class PlayerTx {
     });
   }
 
+  /** `lostStreak`: undefined thì không đụng trường, null thì xoá. */
   updatePlayer(
     uid: string,
     player: PlayerSnapshot,
@@ -111,18 +159,27 @@ export class PlayerTx {
     devices: Record<string, DeviceState>,
     deviceId: string,
     lastSeq: number,
+    lostStreak?: LostStreak | null,
   ): void {
     const now = FieldValue.serverTimestamp();
     this.tx.update(this.player(uid), {
       ...player,
       feedQuizSinceReward,
       devices: {...devices, [deviceId]: {lastSeq, lastSyncAt: now}},
+      ...(lostStreak === undefined ? {} : {lostStreak: lostStreak ?? FieldValue.delete()}),
       updatedAt: now,
     });
   }
 
-  setDay(uid: string, day: string, state: DayState): void {
-    this.tx.set(this.player(uid).collection("days").doc(day), state, {merge: true});
+  setDay(uid: string, day: string, data: DayWrite): void {
+    this.tx.set(this.player(uid).collection("days").doc(day), data, {merge: true});
+  }
+
+  setInventory(uid: string, itemId: string, quantity: number): void {
+    this.tx.set(this.player(uid).collection("inventory").doc(itemId), {
+      quantity,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
   }
 
   addLedger(uid: string, entry: LedgerEntry): void {
