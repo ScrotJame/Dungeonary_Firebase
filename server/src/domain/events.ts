@@ -45,15 +45,15 @@ export interface GuestProfile {
 /** Giá trị `at` lớn nhất mà `new Date()` còn biểu diễn được. */
 const MAX_DATE_MS = 8.64e15;
 
-function isRecord(v: unknown): v is Record<string, unknown> {
+export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function isInt(v: unknown): v is number {
+export function isInt(v: unknown): v is number {
   return typeof v === "number" && Number.isSafeInteger(v);
 }
 
-function isIntBetween(v: unknown, min: number, max: number): v is number {
+export function isIntBetween(v: unknown, min: number, max: number): v is number {
   return isInt(v) && v >= min && v <= max;
 }
 

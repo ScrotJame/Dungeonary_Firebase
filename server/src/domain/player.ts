@@ -28,3 +28,25 @@ export function toSnapshot(p: PlayerSnapshot): PlayerSnapshot {
     },
   };
 }
+
+/** Khoảng thời gian, ms từ epoch: `from` tính, `until` không tính. */
+export interface TimeWindow {
+  from: number;
+  until: number;
+}
+
+/** Chuỗi vừa bị đặt lại, chờ Save Streak (spec shop 4.3, 6.3). */
+export interface LostStreak {
+  value: number;
+  /** yyyy-MM-dd: ngày lỡ đầu tiên, tức lastDay + 1 lúc chuỗi bị đặt lại. */
+  lostOn: string;
+}
+
+/** Thay đổi trên players/{uid} do purchaseItem và useItem ghi. */
+export interface PlayerChanges {
+  gems?: number;
+  streak?: Streak;
+  doubleGems?: TimeWindow;
+  /** null thì xoá trường lostStreak. */
+  lostStreak?: LostStreak | null;
+}
