@@ -33,14 +33,15 @@ export async function syncProgress(
 
     // Mọi lượt đọc phải xong trước lượt ghi đầu tiên.
     const days = await tx.getDays(uid, batch.capDays);
-    const history = needsStreakHistory(player.streak, batch.streakCandidates) ?
-      await tx.getStreakDays(uid) :
-      null;
-
     const result = applyBatch(batch.placed, days, {
       feedQuizSinceReward: player.feedQuizSinceReward,
       totalLearned: player.totalLearned,
     });
+    const {lastDay} = player.streak;
+    const history = lastDay !== null && needsStreakHistory(player.streak, result.newStreakDays) ?
+      await tx.getStreakRun(uid, lastDay, new Set(result.newStreakDays)) :
+      null;
+
     const xp = player.xp + result.xp;
     const next: PlayerSnapshot = {
       gems: player.gems + result.gems,

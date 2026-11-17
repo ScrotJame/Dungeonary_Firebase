@@ -58,7 +58,7 @@ describe("advanceStreak: trường hợp khác", () => {
 });
 
 describe("needsStreakHistory", () => {
-  it("chỉ đúng khi có ngày ứng viên đứng trước lastDay", () => {
+  it("chỉ đúng khi có ngày streak mới đứng trước lastDay", () => {
     const s = {current: 2, longest: 2, lastDay: "2026-11-17"};
     expect(needsStreakHistory(s, ["2026-11-16"])).toBe(true);
     expect(needsStreakHistory(s, ["2026-11-17", "2026-11-18"])).toBe(false);

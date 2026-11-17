@@ -1,10 +1,10 @@
 import {addDays} from "./days";
 import type {Streak} from "./player";
 
-/** Cần đọc lịch sử ngày streak khi có ngày ứng viên đứng trước lastDay. */
-export function needsStreakHistory(streak: Streak, candidateDays: string[]): boolean {
+/** Cần đọc lịch sử ngày streak khi có ngày streak mới đứng trước lastDay. */
+export function needsStreakHistory(streak: Streak, newStreakDays: string[]): boolean {
   const lastDay = streak.lastDay;
-  return lastDay !== null && candidateDays.some((day) => day < lastDay);
+  return lastDay !== null && newStreakDays.some((day) => day < lastDay);
 }
 
 /** Số ngày liền nhau có trong `days`, đếm lùi từ `end`. */
@@ -16,7 +16,8 @@ function runEndingAt(end: string, days: ReadonlySet<string>): number {
 
 /**
  * Cập nhật streak theo spec gốc 6.7 khi các ngày trong `newStreakDays`
- * vừa thành ngày streak. `history` là các ngày streak đã có trong Firestore.
+ * vừa thành ngày streak. `history` là chuỗi ngày streak liền nhau kết thúc ở
+ * `streak.lastDay`; chỉ cần khi `needsStreakHistory` trả true.
  */
 export function advanceStreak(
   streak: Streak,

@@ -5,8 +5,12 @@ import {
   type Firestore,
   type Transaction,
 } from "firebase-admin/firestore";
+import {addDays} from "../domain/days";
 import type {PlayerSnapshot} from "../domain/player";
 import {type DayState, EMPTY_DAY} from "../domain/rewards";
+
+/** Số ngày đọc ở lượt đầu khi dò chuỗi streak; đủ cho khoảng bù ngày cũ (LOOKBACK_DAYS + 1). */
+const STREAK_RUN_FIRST_READ = 8;
 
 export interface DeviceState {
   lastSeq: number;
@@ -59,11 +63,33 @@ export class PlayerTx {
     return result;
   }
 
-  /** Id của mọi document days đang có streakDay == true. */
-  async getStreakDays(uid: string): Promise<string[]> {
-    const query = this.player(uid).collection("days").where("streakDay", "==", true).select();
-    const snap = await this.tx.get(query);
-    return snap.docs.map((doc) => doc.id);
+  /**
+   * Chuỗi ngày streak liền nhau, dò lùi từ `end`. `assumed` là các ngày vừa thành
+   * ngày streak trong lô đang xử lý, chưa được ghi. Đọc document theo id, mỗi lượt
+   * gấp đôi lượt trước, nên số lượt đọc tỉ lệ với độ dài chuỗi chứ không theo tổng
+   * số ngày streak từng có.
+   */
+  async getStreakRun(uid: string, end: string, assumed: ReadonlySet<string>): Promise<string[]> {
+    const run: string[] = [];
+    let from = end;
+    for (let size = STREAK_RUN_FIRST_READ; ; size *= 2) {
+      const chunk = Array.from({length: size}, (_, i) => addDays(from, -i));
+      const stored = new Set<string>();
+      const refs = chunk
+        .filter((day) => !assumed.has(day))
+        .map((day) => this.player(uid).collection("days").doc(day));
+      if (refs.length > 0) {
+        const snaps = await this.tx.getAll(...refs, {fieldMask: ["streakDay"]});
+        for (const snap of snaps) {
+          if (snap.get("streakDay") === true) stored.add(snap.id);
+        }
+      }
+      for (const day of chunk) {
+        if (!assumed.has(day) && !stored.has(day)) return run;
+        run.push(day);
+      }
+      from = addDays(from, -size);
+    }
   }
 
   createPlayer(uid: string, player: PlayerSnapshot, deviceId: string): void {

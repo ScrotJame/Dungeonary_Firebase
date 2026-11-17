@@ -26,6 +26,9 @@ export interface DayState {
   streakDay: boolean;
 }
 
+/** Tiền tố khoá trong `counts` đánh dấu từng quest trễ đã trả trong ngày. */
+const LATE_QUEST_PREFIX = "quest_late_";
+
 export const EMPTY_DAY: DayState = {
   counts: {},
   gemsEarned: 0,
@@ -129,14 +132,22 @@ export function applyEvent(
     }
     case "quest_completed": {
       const quest = QUESTS[event.questId];
+      const limit = quest.isDefault ? MAX_DEFAULT_QUESTS_PER_DAY : MAX_POOL_QUESTS_PER_DAY;
+      const sameKind = (ids: string[]): number =>
+        ids.filter((id) => QUESTS[id]?.isDefault === quest.isDefault).length;
       if (!streakEligible) {
-        if (take("quest_late", 1, LATE_QUESTS_PER_DAY) === 1) gems = quest.gems;
+        // Quest trễ không vào `quests`: id đã trả nằm ở counts["quest_late_<id>"].
+        const paid = Object.keys(counts)
+          .filter((key) => key.startsWith(LATE_QUEST_PREFIX))
+          .map((key) => key.slice(LATE_QUEST_PREFIX.length));
+        if (paid.includes(event.questId) || sameKind(paid) >= limit) break;
+        if (take("quest_late", 1, LATE_QUESTS_PER_DAY) === 1) {
+          counts[LATE_QUEST_PREFIX + event.questId] = 1;
+          gems = quest.gems;
+        }
         break;
       }
-      if (quests.includes(event.questId)) break;
-      const sameKind = quests.filter((id) => QUESTS[id]?.isDefault === quest.isDefault).length;
-      const limit = quest.isDefault ? MAX_DEFAULT_QUESTS_PER_DAY : MAX_POOL_QUESTS_PER_DAY;
-      if (sameKind >= limit) break;
+      if (quests.includes(event.questId) || sameKind(quests) >= limit) break;
       quests = [...quests, event.questId];
       gems = quest.gems;
       break;
@@ -175,8 +186,6 @@ export interface PlacedBatch {
   maxSeq: number;
   /** Các ngày cần đọc document days. */
   capDays: string[];
-  /** Các ngày có thể vừa thành ngày streak trong lô này. */
-  streakCandidates: string[];
 }
 
 export function placeBatch(items: BatchItem[], lastSeq: number, now: number): PlacedBatch {
@@ -193,15 +202,11 @@ export function placeBatch(items: BatchItem[], lastSeq: number, now: number): Pl
     if (placement) placed.push({event, ...placement});
   }
 
-  const candidates = placed
-    .filter((p) => p.streakEligible && p.event.type === "quest_completed")
-    .map((p) => p.capDay);
   return {
     placed,
     minSeq: ordered[0]?.seq ?? lastSeq,
     maxSeq: ordered.at(-1)?.seq ?? lastSeq,
     capDays: [...new Set(placed.map((p) => p.capDay))],
-    streakCandidates: [...new Set(candidates)],
   };
 }
 

@@ -174,6 +174,35 @@ describe("applyEvent: quest_completed", () => {
     const out = applyEvent(quest("learn_5"), day({counts: {quest_late: 3}}), zero, false);
     expect(out.gems).toBe(0);
   });
+
+  it("cùng questId của ngày quá cũ chỉ trả một lần mỗi ngày", () => {
+    const first = applyEvent(quest("learn_10"), day(), zero, false);
+    expect(first.gems).toBe(15);
+    const again = applyEvent(quest("learn_10"), first.day, zero, false);
+    expect(again.gems).toBe(0);
+    expect(again.day.counts.quest_late).toBe(1);
+  });
+
+  it("quest của ngày quá cũ cũng tối đa hai quest của pool", () => {
+    let state = day();
+    let gems = 0;
+    for (const id of ["learn_10", "quiz_1", "feed_10", "default_active_time"]) {
+      const out = applyEvent(quest(id), state, zero, false);
+      state = out.day;
+      gems += out.gems;
+    }
+    // learn_10 (15) + quiz_1 (15) + default_active_time (5); feed_10 là quest pool thứ ba.
+    expect(gems).toBe(35);
+    expect(state.counts.quest_late).toBe(3);
+    expect(state.quests).toEqual([]);
+  });
+
+  it("quest của ngày quá cũ không chiếm chỗ quest của hôm nay", () => {
+    const late = applyEvent(quest("learn_5"), day(), zero, false);
+    const onTime = applyEvent(quest("learn_5"), late.day, zero, true);
+    expect(onTime.gems).toBe(10);
+    expect(onTime.day.quests).toEqual(["learn_5"]);
+  });
 });
 
 describe("applyEvent: trần tổng mỗi ngày và số từ", () => {
@@ -226,14 +255,17 @@ describe("placeBatch", () => {
     expect(out.placed).toHaveLength(1);
   });
 
-  it("streakCandidates chỉ gồm ngày của quest còn tính streak", () => {
+  it("quest của ngày quá cũ được xếp vào hôm nay và không tính streak", () => {
     const old: GameEvent = {
       seq: 2, at: NOW - 8 * DAY_MS, day: "2026-11-09", type: "quest_completed", questId: "feed_5",
     };
     const out = placeBatch(
       [{seq: 1, event: quest("learn_5")}, {seq: 2, event: old}, {seq: 3, event: mastered(3)}],
       0, NOW);
-    expect(out.streakCandidates).toEqual([TODAY]);
+    expect(out.placed.map((p) => [p.capDay, p.streakEligible])).toEqual([
+      [TODAY, true], [TODAY, false], [TODAY, true],
+    ]);
+    expect(out.capDays).toEqual([TODAY]);
   });
 });
 
