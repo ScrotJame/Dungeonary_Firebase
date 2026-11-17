@@ -1,3 +1,4 @@
+import {utcDay} from "../domain/days";
 import {parseSyncInput} from "../domain/events";
 import {levelForXp} from "../domain/level";
 import {type PlayerSnapshot, toSnapshot} from "../domain/player";
@@ -48,7 +49,13 @@ export async function syncProgress(
       xp,
       level: levelForXp(xp),
       totalLearned: result.counters.totalLearned,
-      streak: advanceStreak(player.streak, result.newStreakDays, history),
+      streak: advanceStreak(
+        player.streak,
+        result.newStreakDays,
+        history === null ? null : {streakDays: history, frozenDays: []},
+        // Task 6 thay bằng số Freeze và lostStreak thật.
+        {freezes: 0, lostStreak: null, today: utcDay(now)},
+      ).streak,
     };
 
     tx.updatePlayer(
