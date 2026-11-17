@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {initFirebase, isTokenRejection} from "../../src/server";
+import {initFirebase, isTokenRejection, shutdownHandler} from "../../src/server";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -16,6 +16,40 @@ describe("isTokenRejection", () => {
     expect(isTokenRejection(new Error("network"))).toBe(false);
     expect(isTokenRejection({code: 5})).toBe(false);
     expect(isTokenRejection(null)).toBe(false);
+  });
+});
+
+describe("shutdownHandler", () => {
+  it("chờ server đóng xong rồi thoát với mã 0, chỉ một lần", () => {
+    const exit = vi.fn();
+    let closed: (() => void) | undefined;
+    const close = vi.fn((cb: () => void) => {
+      closed = cb;
+    });
+    const onSignal = shutdownHandler({close}, exit, 1000);
+
+    onSignal();
+    onSignal();
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(exit).not.toHaveBeenCalled();
+
+    closed?.();
+    expect(exit).toHaveBeenCalledExactlyOnceWith(0);
+  });
+
+  it("thoát với mã 1 khi request đang chạy không xong trong thời gian chờ", () => {
+    vi.useFakeTimers();
+    try {
+      const exit = vi.fn();
+      const onSignal = shutdownHandler({close: () => undefined}, exit, 1000);
+      onSignal();
+      vi.advanceTimersByTime(999);
+      expect(exit).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(exit).toHaveBeenCalledExactlyOnceWith(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

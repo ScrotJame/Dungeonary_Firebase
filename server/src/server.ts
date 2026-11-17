@@ -39,6 +39,28 @@ export function isTokenRejection(err: unknown): boolean {
     code !== "auth/internal-error";
 }
 
+/**
+ * Trình xử lý SIGTERM. Render gửi SIGTERM rồi chờ 30 giây trước khi SIGKILL:
+ * ngừng nhận kết nối mới, chờ request đang chạy xong rồi thoát. Quá `graceMs`
+ * thì thoát luôn; dữ liệu vẫn an toàn vì mỗi request là một transaction.
+ */
+export function shutdownHandler(
+  server: {close(callback: () => void): unknown},
+  exit: (code: number) => void,
+  graceMs = 25_000,
+): () => void {
+  let started = false;
+  return () => {
+    if (started) return;
+    started = true;
+    const timer = setTimeout(() => exit(1), graceMs);
+    server.close(() => {
+      clearTimeout(timer);
+      exit(0);
+    });
+  };
+}
+
 export function buildServer(firebaseApp: App): Express {
   const auth = getAuth(firebaseApp);
   const deps: HandlerDeps = {
