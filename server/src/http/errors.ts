@@ -3,6 +3,7 @@ export type ErrorCode =
   | "invalid-argument"
   | "failed-precondition"
   | "not-found"
+  | "resource-exhausted"
   | "internal";
 
 const STATUS: Record<ErrorCode, number> = {
@@ -10,6 +11,7 @@ const STATUS: Record<ErrorCode, number> = {
   "invalid-argument": 400,
   "failed-precondition": 409,
   "not-found": 404,
+  "resource-exhausted": 429,
   "internal": 500,
 };
 

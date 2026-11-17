@@ -5,6 +5,7 @@ import express, {
 } from "express";
 import {requireAuth, type VerifyToken} from "./http/auth";
 import {AppError, toHttp} from "./http/errors";
+import {DEFAULT_RATE_LIMIT, rateLimit, type RateLimitOptions} from "./http/rateLimit";
 
 export type Handler = (uid: string, input: unknown) => Promise<unknown>;
 
@@ -12,6 +13,8 @@ export interface AppDeps {
   verifyToken: VerifyToken;
   /** Mỗi khoá `name` thành route `POST /v1/<name>`. */
   handlers: Record<string, Handler>;
+  /** Thiếu thì dùng DEFAULT_RATE_LIMIT. */
+  rateLimit?: RateLimitOptions;
 }
 
 const requireJson: RequestHandler = (req, _res, next) => {
@@ -37,6 +40,7 @@ export function createApp(deps: AppDeps): Express {
 
   const api = express.Router();
   api.use(requireAuth(deps.verifyToken));
+  api.use(rateLimit(deps.rateLimit ?? DEFAULT_RATE_LIMIT));
   api.use(requireJson);
   api.use(express.json({limit: "256kb"}));
   for (const [name, handler] of Object.entries(deps.handlers)) {

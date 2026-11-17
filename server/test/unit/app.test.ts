@@ -143,3 +143,56 @@ describe("route lạ", () => {
     expect(res.body).toEqual({error: {code: "not-found"}});
   });
 });
+
+describe("trần số lượt gọi", () => {
+  /** Token chính là uid, để thử nhiều tài khoản. */
+  function limitedApp(
+    handler: (uid: string, input: unknown) => Promise<unknown>,
+    now: () => number,
+  ) {
+    return createApp({
+      verifyToken: async (token) => ({uid: token}),
+      handlers: {echo: handler},
+      rateLimit: {limit: 3, windowMs: 60_000, now},
+    });
+  }
+  const call = (app: ReturnType<typeof createApp>, uid: string) =>
+    request(app).post("/v1/echo").set("Authorization", `Bearer ${uid}`).send({});
+
+  it("vượt trần thì 429 resource-exhausted và không tới handler", async () => {
+    const handler = vi.fn(echo);
+    const app = limitedApp(handler, () => 0);
+    for (let i = 0; i < 3; i++) expect((await call(app, "user-1")).status).toBe(200);
+
+    const blocked = await call(app, "user-1");
+    expect(blocked.status).toBe(429);
+    expect(blocked.body).toEqual({error: {code: "resource-exhausted"}});
+    expect(handler).toHaveBeenCalledTimes(3);
+  });
+
+  it("mỗi uid có bộ đếm riêng", async () => {
+    const app = limitedApp(echo, () => 0);
+    for (let i = 0; i < 4; i++) await call(app, "user-1");
+    expect((await call(app, "user-2")).status).toBe(200);
+  });
+
+  it("hết cửa sổ thì đếm lại từ đầu", async () => {
+    let t = 0;
+    const app = limitedApp(echo, () => t);
+    for (let i = 0; i < 3; i++) await call(app, "user-1");
+    expect((await call(app, "user-1")).status).toBe(429);
+    t = 60_000;
+    expect((await call(app, "user-1")).status).toBe(200);
+  });
+
+  it("mặc định cho 60 request mỗi phút, request thứ 61 bị chặn", async () => {
+    const handler = vi.fn(echo);
+    const app = makeApp(handler);
+    for (let i = 0; i < 60; i++) {
+      expect((await request(app).post("/v1/echo").set(AUTH).send({})).status).toBe(200);
+    }
+    const blocked = await request(app).post("/v1/echo").set(AUTH).send({});
+    expect(blocked.status).toBe(429);
+    expect(handler).toHaveBeenCalledTimes(60);
+  });
+});
