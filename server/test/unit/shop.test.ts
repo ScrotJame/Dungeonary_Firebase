@@ -33,6 +33,10 @@ describe("parsePurchaseInput", () => {
     expect(parsePurchaseInput(body({quantity: 10}))).toEqual(body({quantity: 10}));
   });
 
+  it("requestId viết hoa được nhận và trả về dạng chữ thường", () => {
+    expect(parsePurchaseInput(body({requestId: RID.toUpperCase()})).requestId).toBe(RID);
+  });
+
   it("itemId đúng dạng nhưng không có thật vẫn qua bước này", () => {
     expect(parsePurchaseInput(body({itemId: "khong_co"})).itemId).toBe("khong_co");
   });
@@ -59,6 +63,10 @@ describe("parseUseInput", () => {
   it("nhận dữ liệu hợp lệ", () => {
     expect(parseUseInput({itemId: "double_gems", requestId: RID}))
       .toEqual({itemId: "double_gems", requestId: RID});
+  });
+
+  it("requestId viết hoa được nhận và trả về dạng chữ thường", () => {
+    expect(parseUseInput({itemId: "double_gems", requestId: RID.toUpperCase()}).requestId).toBe(RID);
   });
 
   it.each([

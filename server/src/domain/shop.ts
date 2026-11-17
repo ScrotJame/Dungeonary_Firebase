@@ -37,7 +37,7 @@ function parseItemId(v: unknown): string {
 
 function parseRequestId(v: unknown): string {
   if (typeof v !== "string" || !REQUEST_ID_RE.test(v)) throw new AppError("invalid-argument");
-  return v;
+  return v.toLowerCase();
 }
 
 export function parsePurchaseInput(body: unknown): PurchaseInput {
