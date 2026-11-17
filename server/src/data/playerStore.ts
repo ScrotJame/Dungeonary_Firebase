@@ -9,6 +9,7 @@ import {
 import {addDays} from "../domain/days";
 import type {LostStreak, PlayerChanges, PlayerSnapshot, TimeWindow} from "../domain/player";
 import {type DayState, EMPTY_DAY} from "../domain/rewards";
+import type {UseEffect} from "../domain/shop";
 import type {StreakRun} from "../domain/streak";
 
 /** Số ngày đọc ở lượt đầu khi dò chuỗi streak; đủ cho khoảng bù ngày cũ (LOOKBACK_DAYS + 1). */
@@ -40,7 +41,8 @@ export type LedgerEntry =
     days: string[];
     deviceId: string;
   }
-  | {type: "purchase"; gems: number; xp: 0; itemId: string; quantity: number; price: number};
+  | {type: "purchase"; gems: number; xp: 0; itemId: string; quantity: number; price: number}
+  | {type: "use_item"; gems: 0; xp: 0; itemId: string; quantity: 1; effect: UseEffect};
 
 /** Ghi một phần document days; `frozen` đánh dấu ngày được Streak Freeze cứu. */
 export type DayWrite = Partial<DayState> & {frozen?: boolean};
